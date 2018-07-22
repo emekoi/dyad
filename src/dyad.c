@@ -23,6 +23,7 @@
   #include <fcntl.h>
   #include <sys/types.h>
   #include <sys/socket.h>
+  #include <sys/un.h>
   #include <sys/time.h>
   #include <netinet/in.h>
   #include <netinet/tcp.h>
@@ -35,6 +36,7 @@
 #include <signal.h>
 #include <errno.h>
 #include <limits.h>
+#include <stddef.h>
 
 #include "dyad.h"
 
@@ -56,17 +58,18 @@
   #define EWOULDBLOCK WSAEWOULDBLOCK
 
   const char *inet_ntop(int af, const void *src, char *dst, socklen_t size) {
-    union { struct sockaddr sa; struct sockaddr_in sai;
+    union { struct sockaddr_storage sa; struct sockaddr_in sai;
             struct sockaddr_in6 sai6; } addr;
     int res;
     memset(&addr, 0, sizeof(addr));
-    addr.sa.sa_family = af;
     if (af == AF_INET6) {
+      ((struct sockaddr_in6 *) &addr.sa)->sin6_family = af;
       memcpy(&addr.sai6.sin6_addr, src, sizeof(addr.sai6.sin6_addr));
     } else {
+      ((struct sockaddr_in *) &addr.sa)->sin_family = af;
       memcpy(&addr.sai.sin_addr, src, sizeof(addr.sai.sin_addr));
     }
-    res = WSAAddressToStringA(&addr.sa, sizeof(addr), 0, dst, (LPDWORD) &size);
+    res = WSAAddressToStringA((LPSOCKADDR) &addr.sa, sizeof(addr), 0, dst, (LPDWORD) &size);
     if (res != 0) return NULL;
     return dst;
   }
@@ -94,6 +97,7 @@ static void *dyad_realloc(void *ptr, int n) {
 
 static void dyad_free(void *ptr) {
   free(ptr);
+  ptr = NULL;
 }
 
 
@@ -1032,6 +1036,37 @@ int dyad_connect(dyad_Stream *stream, const char *host, int port) {
   return 0;
 fail:
   if (ai) freeaddrinfo(ai);
+  return -1;
+}
+
+
+int dyad_connect_unix(dyad_Stream *stream, const char *path) {
+#ifdef _WIN32
+  stream_error(stream, "operation unsupported on windows", 0);
+  goto fail;
+#else
+  struct sockaddr_un hints;
+  size_t size;
+  int err;
+
+  /* Resolve host */
+  memset(&hints, 0, sizeof(hints));
+  hints.sun_family = AF_UNIX;
+  strncpy(hints.sun_path, path, (sizeof(hints.sun_path) - 1));
+  if (strcmp(hints.sun_path, path) != 0) {
+    stream_error(stream, "file path too long", 0);
+    goto fail;
+  }
+
+  /* Start connecting */
+  err = stream_initSocket(stream, hints.sun_family, SOCK_STREAM, 0);
+  if (err) goto fail;
+  size = (offsetof(struct sockaddr_un, sun_path) + strlen(hints.sun_path));
+  connect(stream->sockfd, (struct sockaddr *) &hints, size);
+  stream->state = DYAD_STATE_CONNECTING;
+#endif
+  return 0;
+fail:
   return -1;
 }
 

@@ -63,6 +63,9 @@ Performs the same task as `dyad_listen()` but provides additional options:
 #### int dyad\_connect(dyad\_Stream \*stream, const char \*host, int port)
 Connects the `stream` to the remote `host`.
 
+#### int dyad\_connect\_unix(dyad\_Stream \*stream, const char \*path)
+Connects the `stream` to `unix` domain socket.
+
 #### void dyad\_addListener(dyad\_Stream \*stream, int event, dyad\_Callback callback, void \*udata)
 Adds a listener for the `event` to the `stream`. When the event occurs the
 `callback` is called and the event's udata field is set to `udata`. If several
